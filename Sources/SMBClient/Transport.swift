@@ -24,11 +24,20 @@ public struct DirectTCPPacket {
     self.smb2Message = smb2Message
   }
 
-  public init(response: Data) {
+  /// Largest message the 3-byte length field can describe (16 MB).
+  public static let maximumMessageLength: UInt32 = 0x00FF_FFFF
+
+  public init(response: Data) throws {
     let reader = ByteReader(response)
     zero = 0
 
-    let length = (reader.read() as UInt32).bigEndian
+    // The first byte must be zero and the next three are the length, so a
+    // valid length is at most 16 MB. Anything else is a forged or corrupt
+    // frame that would otherwise make the client buffer up to 4 GB.
+    let length = (try reader.read() as UInt32).bigEndian
+    guard length <= Self.maximumMessageLength else {
+      throw MalformedMessageError("transport frame claims \(length) bytes")
+    }
 
     var data = Data(capacity: 3)
     let byte1 = UInt8((length >> 16) & 0x000000FF)

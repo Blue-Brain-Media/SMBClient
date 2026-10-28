@@ -76,29 +76,32 @@ public enum QueryDirectory {
     public let outputBufferLength: UInt32
     public let buffer: Data
 
-    public init(data: Data) {
+    public init(data: Data) throws {
       let reader = ByteReader(data)
 
-      header = reader.read()
+      header = try reader.read()
 
-      structureSize = reader.read()
-      outputBufferOffset = reader.read()
-      outputBufferLength = reader.read()
-      buffer = reader.read(from: Int(outputBufferOffset), count: Int(outputBufferLength))
+      structureSize = try reader.read()
+      outputBufferOffset = try reader.read()
+      outputBufferLength = try reader.read()
+      buffer = try reader.read(from: Int(outputBufferOffset), count: Int(outputBufferLength))
     }
 
-    public func files() -> [FileDirectoryInformation] {
+    /// The entries in `buffer`. Each entry's `nextEntryOffset` must point
+    /// forward and stay inside the buffer; otherwise the reply is refused.
+    public func files() throws -> [FileDirectoryInformation] {
       var files = [FileDirectoryInformation]()
-      if outputBufferLength > 0 {
-        var data = Data(buffer)
-        repeat {
-          let fileInformation = FileDirectoryInformation(data: data)
-          files.append(fileInformation)
-          data = Data(data[(fileInformation.nextEntryOffset)...])
-        } while files.last!.nextEntryOffset != 0
+      guard outputBufferLength > 0 else { return files }
+      var offset = 0
+      while true {
+        guard offset < buffer.count else {
+          throw MalformedMessageError("directory entry at \(offset) is outside the \(buffer.count)-byte buffer")
+        }
+        let entry = try FileDirectoryInformation(data: Data(buffer[(buffer.startIndex + offset)...]))
+        files.append(entry)
+        guard entry.nextEntryOffset != 0 else { return files }
+        offset += Int(entry.nextEntryOffset)
       }
-
-      return files
     }
   }
 

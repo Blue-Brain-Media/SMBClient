@@ -31,7 +31,8 @@ public class Connection {
     self.host = host
     let endpoint = NWEndpoint.hostPort(
       host: NWEndpoint.Host(host),
-      port: NWEndpoint.Port(rawValue: UInt16(port))!
+      // A port outside 0...65535 used to trap here; now the connection just fails.
+      port: UInt16(exactly: port).flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any
     )
     connection = NWConnection(to: endpoint, using: .tcp)
     queue = DispatchQueue(label: "com.kishikawakatsumi.smbclient.connection.\(host):\(port)", qos: .userInitiated)
@@ -159,73 +160,85 @@ public class Connection {
           break
         }
 
-        let transportPacket = DirectTCPPacket(response: self.buffer)
+        let transportPacket: DirectTCPPacket
+        do {
+          transportPacket = try DirectTCPPacket(response: self.buffer)
+        } catch {
+          completion(.failure(error))
+          return
+        }
         let length = Int(transportPacket.protocolLength)
         self.buffer = Data(transportPacket.smb2Message)
 
         self.receive(upTo: length) { (result) in
           switch result {
           case .success:
-            let data = Data(self.buffer.prefix(length))
-            self.buffer = Data(self.buffer.suffix(from: length))
+            // A malformed reply (short, oversized, or with offsets outside
+            // itself) fails this request instead of crashing.
+            do {
+              let data = Data(self.buffer.prefix(length))
+              self.buffer = Data(self.buffer.suffix(from: length))
 
-            let reader = ByteReader(data)
-            var offset = 0
+              let reader = ByteReader(data)
+              var offset = 0
 
-            var header: Header
-            var response = Data()
-            repeat {
-              header = reader.read()
+              var header: Header
+              var response = Data()
+              repeat {
+                header = try reader.read()
 
-              switch NTStatus(header.status) {
-              case
-                .success,
-                .moreProcessingRequired,
-                .noMoreFiles,
-                .endOfFile:
-                response += data
-              case .pending:
-                if self.buffer.count >= 4 {
-                  let transportPacket = DirectTCPPacket(response: self.buffer)
-                  let length = Int(transportPacket.protocolLength)
+                switch NTStatus(header.status) {
+                case
+                  .success,
+                  .moreProcessingRequired,
+                  .noMoreFiles,
+                  .endOfFile:
+                  response += data
+                case .pending:
+                  if self.buffer.count >= 4 {
+                    let transportPacket = try DirectTCPPacket(response: self.buffer)
+                    let length = Int(transportPacket.protocolLength)
 
-                  if self.buffer.count < 4 + length {
+                    if self.buffer.count < 4 + length {
+                      self.receive(completion: completion)
+                      return
+                    }
+
+                    let data = transportPacket.smb2Message
+                    self.buffer = Data(self.buffer.suffix(from: 4 + length))
+
+                    let reader = ByteReader(data)
+                    let header: Header = try reader.read()
+
+                    switch NTStatus(header.status) {
+                    case
+                      .success,
+                      .moreProcessingRequired,
+                      .noMoreFiles,
+                      .endOfFile:
+                      response += data
+                      break
+                    default:
+                      completion(.failure(try ErrorResponse(data: data)))
+                      return
+                    }
+                  } else {
                     self.receive(completion: completion)
                     return
                   }
-
-                  let data = transportPacket.smb2Message
-                  self.buffer = Data(self.buffer.suffix(from: 4 + length))
-
-                  let reader = ByteReader(data)
-                  let header: Header = reader.read()
-
-                  switch NTStatus(header.status) {
-                  case
-                    .success,
-                    .moreProcessingRequired,
-                    .noMoreFiles,
-                    .endOfFile:
-                    response += data
-                    break
-                  default:
-                    completion(.failure(ErrorResponse(data: data)))
-                    return
-                  }
-                } else {
-                  self.receive(completion: completion)
+                default:
+                  completion(.failure(try ErrorResponse(data: Data(data[offset...]))))
                   return
                 }
-              default:
-                completion(.failure(ErrorResponse(data: Data(data[offset...]))))
-                return
-              }
 
-              offset += Int(header.nextCommand)
-              reader.seek(to: offset)
-            } while header.nextCommand > 0
+                offset += Int(header.nextCommand)
+                try reader.seek(to: offset)
+              } while header.nextCommand > 0
 
-            completion(.success(response))
+              completion(.success(response))
+            } catch {
+              completion(.failure(error))
+            }
           case .failure(let error):
             completion(.failure(error))
           }

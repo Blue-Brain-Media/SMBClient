@@ -69,21 +69,25 @@ struct WStr {
     terminator = 0
   }
 
-  init(referentID: UInt32, byteReader: ByteReader) {
+  init(referentID: UInt32, byteReader: ByteReader) throws {
     self.referentID = referentID
 
-    maxCount = byteReader.read()
-    offset = byteReader.read()
-    actualCount = byteReader.read()
+    maxCount = try byteReader.read()
+    offset = try byteReader.read()
+    actualCount = try byteReader.read()
 
     let valueCount = Int(actualCount) * 2
-    valueData = byteReader.read(count: valueCount)
+    valueData = try byteReader.read(count: valueCount)
     if valueCount % 4 != 0 {
-      terminator = byteReader.read()
+      terminator = try byteReader.read()
     } else {
       terminator = 0
     }
 
+    // The count includes a 2-byte null terminator, so it can't be empty.
+    guard valueData.count >= 2 else {
+      throw MalformedMessageError("string without its terminator in a share list")
+    }
     let valueData = Data(valueData)[0..<valueData.count - 2]
     value = String(data: valueData, encoding: .utf16LittleEndian) ?? valueData.hex
   }
@@ -135,20 +139,20 @@ struct NetShareEnumResponse {
   let resumeHandle: UInt32
   let status: UInt32
 
-  init(data: Data) {
+  init(data: Data) throws {
     let reader = ByteReader(data)
 
-    level = reader.read()
-    shareCtr = reader.read()
+    level = try reader.read()
+    shareCtr = try reader.read()
     netShareCtr = NetShareCtr(
-      refferentID: reader.read(),
-      count: reader.read()
+      refferentID: try reader.read(),
+      count: try reader.read()
     )
-    shareInfo1 = NetShareInfo1(byteReader: reader)
-    padding = reader.read(count: reader.offset % 4 == 0 ? 0 : 4 - reader.offset % 4)
-    totalEntries = reader.read()
-    resumeHandle = reader.read()
-    status = reader.read()
+    shareInfo1 = try NetShareInfo1(byteReader: reader)
+    padding = try reader.read(count: reader.offset % 4 == 0 ? 0 : 4 - reader.offset % 4)
+    totalEntries = try reader.read()
+    resumeHandle = try reader.read()
+    status = try reader.read()
   }
 
   struct NetShareCtr {
@@ -161,19 +165,24 @@ struct NetShareEnumResponse {
     let count: UInt32
     let shareInfo: [ShareInfo1]
 
-    init(byteReader: ByteReader) {
-      refferentID = byteReader.read()
-      count = byteReader.read()
-      shareInfo = (0..<count)
+    init(byteReader: ByteReader) throws {
+      refferentID = try byteReader.read()
+      count = try byteReader.read()
+      // Each entry needs at least 12 bytes; check before `map` reserves room
+      // for `count` entries, which could be billions in a forged reply.
+      guard Int(count) <= byteReader.availableBytes / 12 else {
+        throw MalformedMessageError("share list claims \(count) entries but has only \(byteReader.availableBytes) bytes")
+      }
+      shareInfo = try (0..<count)
         .map { _ in
-          let nameRefferentID: UInt32 = byteReader.read()
-          let type: UInt32 = byteReader.read()
-          let commentRefferentID: UInt32 = byteReader.read()
+          let nameRefferentID: UInt32 = try byteReader.read()
+          let type: UInt32 = try byteReader.read()
+          let commentRefferentID: UInt32 = try byteReader.read()
           return (nameRefferentID, type, commentRefferentID)
         }
         .map { (nameRefferentID, type, commentRefferentID) in
-          let name = WStr(referentID: nameRefferentID, byteReader: byteReader)
-          let comment = WStr(referentID: commentRefferentID, byteReader: byteReader)
+          let name = try WStr(referentID: nameRefferentID, byteReader: byteReader)
+          let comment = try WStr(referentID: commentRefferentID, byteReader: byteReader)
           return ShareInfo1(name: name, type: type, comment: comment)
         }
     }
