@@ -276,29 +276,6 @@ public class Session {
   }
 
   @discardableResult
-  public func write(data: Data, fileId: Data, offset: UInt64) async throws -> Write.Response {
-    try await write(data: data, fileId: fileId, offset: offset, length: maxWriteSize)
-  }
-
-  @discardableResult
-  public func write(data: Data, fileId: Data, offset: UInt64, length: UInt32) async throws -> Write.Response {
-    let writeSize = min(length, maxWriteSize)
-    let creditSize = creditSize(size: writeSize)
-
-    let request = Write.Request(
-      creditCharge: creditSize,
-      messageId: messageId.next(count: UInt64(creditSize)),
-      treeId: treeId,
-      sessionId: sessionId,
-      fileId: fileId,
-      offset: offset,
-      data: data
-    )
-
-    return try await send(request)
-  }
-
-  @discardableResult
   public func close(fileId: Data) async throws -> Close.Response {
     let request = Close.Request(
       messageId: messageId.next(),

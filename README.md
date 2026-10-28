@@ -1,5 +1,12 @@
 # SMBClient
 
+> **Blue Brain Media fork, used by [Driftframe](https://github.com/Blue-Brain-Media).** Differences from upstream:
+> - All reply parsing is bounds-checked: short, oversized or forged replies throw `MalformedMessageError` instead of crashing (branch `bounds-checks`, offered upstream).
+> - Upload/write support is removed (`FileWriter`, `Write`, `upload(…)`), because Driftframe only reads. This also removes the only file-timestamp API use.
+>
+> The MIT licence and copyright are unchanged; see [LICENSE](LICENSE).
+
+
 [![Test](https://github.com/kishikawakatsumi/SMBClient/actions/workflows/test.yml/badge.svg)](https://github.com/kishikawakatsumi/SMBClient/actions/workflows/test.yml)
 
 Swift SMB client library and iOS/macOS file browser applications. This library provides a high-level interface to the SMB protocol and allows you to access files on remote SMB servers. Written in Swift, no dependencies on external libraries.
@@ -74,12 +81,6 @@ print(files.map { $0.fileName })
 
 ```swift
 let data = try await client.download(path: "Pictures/IMG_0001.jpg")
-```
-
-### Upload a file/directory
-
-```swift
-try await client.upload(data: data, path: "Documents/Presentations/Keynote.key")
 ```
 
 ## Example Applications

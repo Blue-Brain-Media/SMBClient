@@ -142,52 +142,8 @@ public class SMBClient {
     try await fileReader.close()
   }
 
-  public func upload(content: Data, path: String) async throws {
-    try await upload(content: content, path: Pathname.normalize(path), progressHandler: { _ in })
-  }
-
-  public func upload(content: Data, path: String, progressHandler: (_ progress: Double) -> Void) async throws {
-    let fileWriter = fileWriter(path: Pathname.normalize(path))
-
-    try await fileWriter.upload(data: content, progressHandler: progressHandler)
-    try await fileWriter.close()
-  }
-
-  public func upload(fileHandle: FileHandle, path: String) async throws {
-    try await upload(fileHandle: fileHandle, path: path, progressHandler: { _ in })
-  }
-
-  public func upload(fileHandle: FileHandle, path: String, progressHandler: (_ progress: Double) -> Void) async throws {
-    let path = Pathname.normalize(path)
-    let fileWriter = fileWriter(path: path)
-
-    try await fileWriter.upload(fileHandle: fileHandle, progressHandler: progressHandler)
-    try await fileWriter.close()
-
-    await fileWriter.restoreFileAttributes(fileHandle, path)
-  }
-
-  public func upload(localPath: URL, remotePath path: String) async throws {
-    try await upload(localPath: localPath, remotePath: path, progressHandler: { _, _, _ in })
-  }
-
-  public func upload(
-    localPath: URL,
-    remotePath path: String,
-    progressHandler: (_ completedFiles: Int, _ fileBeingTransferred: URL, _ bytesSent: Int64) -> Void
-  ) async throws {
-    let fileWriter = fileWriter(path: Pathname.normalize(path))
-
-    try await fileWriter.upload(localPath: localPath, progressHandler: progressHandler)
-    try await fileWriter.close()
-  }
-
   public func fileReader(path: String) -> FileReader {
     FileReader(session: session, path: Pathname.normalize(path))
-  }
-
-  public func fileWriter(path: String) -> FileWriter {
-    FileWriter(session: session, path: Pathname.normalize(path))
   }
 
   public func treeAccessor(share: String) -> TreeAccessor {
